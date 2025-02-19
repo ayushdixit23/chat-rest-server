@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
   bio: { type: String, default: "Hey there, i am using Lets chat!" },
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   sentFriendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+  conversation: [{ type: mongoose.Schema.Types.ObjectId, ref: "Conversation" }],
 });
 
 const User = mongoose.model("User", userSchema);

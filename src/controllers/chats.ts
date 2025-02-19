@@ -3,6 +3,7 @@ import asyncHandler from "../middlewares/tryCatch.js";
 import { CustomError } from "../middlewares/errors/CustomError.js";
 import User from "../models/user.js";
 import FriendRequest from "../models/friendrequest.js";
+import Conversation from "../models/conversation.js";
 
 export const createFriendRequest = asyncHandler(async (req: Request, res: Response) => {
     const userId = req?.user?.id;
@@ -89,8 +90,17 @@ export const respondFriendRequest = asyncHandler(async (req: Request, res: Respo
             throw new CustomError("Friend user not found", 404);
         }
 
+        const conversation = new Conversation({
+            users: [user._id, friendUser._id]
+        })
+
+        await conversation.save()
+
         // Add both users to each other's friends list
         user.friends.push(friendUserId);
+        user.conversation.push(conversation._id);
+
+        friendUser.conversation.push(conversation._id);
         friendUser.friends.push(user._id);
 
         await Promise.all([user.save(), friendUser.save()]);
@@ -100,8 +110,41 @@ export const respondFriendRequest = asyncHandler(async (req: Request, res: Respo
 });
 
 export const getallchats = asyncHandler(async (req: Request, res: Response) => {
-    res.status(200).json({ message: "Get all chats" });
+    const userId = req?.user?.id;
+
+    if (!userId) {
+        throw new CustomError("UserId not provided", 400);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+        throw new CustomError("User not found", 404);
+    }
+
+    const conversations = await Conversation.find({ users: userId })
+        .populate({
+            path: "users",
+            select: "fullName profilePic",
+        })
+        .populate({
+            path: "lastMessage",
+            select: "message createdAt",
+        })
+        .sort({ "lastMessage.createdAt": -1 });
+
+    // Format the response to exclude the logged-in user from the `users` array
+    const chatData = conversations.map((conversation) => {
+        const chatPartner = conversation.users.find((user: any) => user._id.toString() !== userId);
+        return {
+            _id: conversation._id,
+            user: chatPartner,
+            lastMessage: conversation.lastMessage,
+        };
+    });
+
+    res.status(200).json({ message: "Get all chats", users: chatData });
 });
+
 
 export const getUserSuggestion = asyncHandler(async (req: Request, res: Response) => {
     const userId = req?.user?.id;
@@ -124,4 +167,19 @@ export const getUserSuggestion = asyncHandler(async (req: Request, res: Response
     }).limit(5).select("-password");
 
     res.status(200).json({ success: true, users: suggestedUsers });
+});
+
+export const fetchFriendRequest = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req?.user?.id;
+
+    if (!userId) {
+        throw new CustomError("UserId not provided", 400);
+    }
+
+    const friendRequests = await FriendRequest.find({
+        isSentTo: userId,
+        status: "pending",
+    }).populate("sentBy", "fullName userName profilePic");
+
+    res.status(200).json({ message: "Fetched friend request!", success: true, requests: friendRequests || [] });
 });
