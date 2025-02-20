@@ -2,112 +2,9 @@ import { Request, Response } from "express";
 import asyncHandler from "../middlewares/tryCatch.js";
 import { CustomError } from "../middlewares/errors/CustomError.js";
 import User from "../models/user.js";
-import FriendRequest from "../models/friendrequest.js";
 import Conversation from "../models/conversation.js";
-
-export const createFriendRequest = asyncHandler(async (req: Request, res: Response) => {
-    const userId = req?.user?.id;
-    const { friendId } = req.params;
-
-    if (!userId) {
-        throw new CustomError("UserId not provided", 400);
-    }
-
-    const user = await User.findById(userId);
-
-    if (!user) {
-        throw new CustomError("User not found", 404);
-    }
-
-    // Check if the users are already friends
-    // @ts-ignore
-    if (user.friends.includes(friendId)) {
-        throw new CustomError("User is already a friend", 400);
-    }
-
-    // Check if a friend request has already been sent
-    const existingRequest = await FriendRequest.findOne({
-        sentBy: userId,
-        isSentTo: friendId,
-        status: "pending",
-    });
-
-    if (existingRequest) {
-        throw new CustomError("Friend request already sent", 400);
-    }
-
-    // Create the friend request
-    const friendRequest = new FriendRequest({
-        sentBy: userId,
-        isSentTo: friendId,
-        status: "pending",
-    });
-
-    await friendRequest.save();
-
-    // Add the friendId to the sentFriendRequests
-    // @ts-ignore
-    user.sentFriendRequests.push(friendId);
-    await user.save();
-
-    res.status(200).json({ success: true, message: "Friend request created!" });
-});
-
-export const respondFriendRequest = asyncHandler(async (req: Request, res: Response) => {
-    const userId = req?.user?.id;
-    const { action }: { action: "accepted" | "rejected" } = req.body;
-    const { friendRequestId } = req.params;
-
-    if (!userId) {
-        throw new CustomError("UserId not provided", 400);
-    }
-
-    // Fetch the friend request and user at the same time
-    const friendRequest = await FriendRequest.findById(friendRequestId);
-
-    if (!friendRequest) {
-        throw new CustomError("Friend request not found", 404);
-    }
-
-    // Update the status of the friend request
-    friendRequest.status = action;
-    await friendRequest.save();
-
-    if (action === "accepted") {
-        const friendUserId = friendRequest?.sentBy;
-
-        // Fetch both users in a single query to reduce database calls
-        const [user, friendUser] = await Promise.all([
-            User.findById(userId),
-            User.findById(friendUserId)
-        ]);
-
-        if (!user) {
-            throw new CustomError("User not found", 404);
-        }
-
-        if (!friendUser) {
-            throw new CustomError("Friend user not found", 404);
-        }
-
-        const conversation = new Conversation({
-            users: [user._id, friendUser._id]
-        })
-
-        await conversation.save()
-
-        // Add both users to each other's friends list
-        user.friends.push(friendUserId);
-        user.conversation.push(conversation._id);
-
-        friendUser.conversation.push(conversation._id);
-        friendUser.friends.push(user._id);
-
-        await Promise.all([user.save(), friendUser.save()]);
-    }
-
-    res.status(200).json({ success: true, message: `Friend request ${action}` });
-});
+import Message from "../models/message.js";
+import mongoose from "mongoose";
 
 export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     const userId = req?.user?.id;
@@ -127,59 +24,121 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
             select: "fullName profilePic",
         })
         .populate({
+            path: "groupAdmin",
+            select: "fullName profilePic",
+        })
+        .populate({
             path: "lastMessage",
             select: "message createdAt",
         })
         .sort({ "lastMessage.createdAt": -1 });
 
-    // Format the response to exclude the logged-in user from the `users` array
     const chatData = conversations.map((conversation) => {
-        const chatPartner = conversation.users.find((user: any) => user._id.toString() !== userId);
-        return {
-            _id: conversation._id,
-            user: chatPartner,
-            lastMessage: conversation.lastMessage,
-        };
+        if (conversation.isGroup) {
+            return {
+                _id: conversation._id,
+                isGroup: true,
+                groupName: conversation.groupName,
+                groupAdmin: conversation.groupAdmin,
+                users: conversation.users,
+                lastMessage: conversation.lastMessage,
+            };
+        } else {
+            const chatPartner = conversation.users.find(
+                (user: any) => user._id.toString() !== userId
+            );
+            return {
+                _id: conversation._id,
+                isGroup: false,
+                user: chatPartner,
+                lastMessage: conversation.lastMessage,
+            };
+        }
     });
 
-    res.status(200).json({ message: "Get all chats", users: chatData });
+    res
+        .status(200)
+        .json({ message: "Get all chats", users: chatData, success: true });
 });
 
+export const getPrivateChat = asyncHandler(
+    async (req: Request, res: Response) => {
+        const userId = req?.user?.id;
+        const { conversationId } = req.params;
 
-export const getUserSuggestion = asyncHandler(async (req: Request, res: Response) => {
-    const userId = req?.user?.id;
+        // Handle missing userId
+        if (!userId) {
+            throw new CustomError("UserId not provided", 400);
+        }
 
-    if (!userId) {
-        throw new CustomError("UserId not provided", 400);
+        // Fetch user details
+        const user = await User.findById(userId);
+        if (!user) {
+            throw new CustomError("User not found", 404);
+        }
+
+        // Fetch conversation details
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) {
+            throw new CustomError("Conversation not found", 404);
+        }
+
+        // Check if the user is part of the conversation
+        if (!conversation.users.includes(user._id)) {
+            throw new CustomError("You are not a part of this conversation", 400);
+        }
+
+        // Fetch messages for the conversation and populate sender details
+        const messages = await Message.find({
+            conversationId: conversationId,
+        }).populate("senderId", "fullName profilePic");
+
+        // Prepare response data2
+        let conversationData: any = {
+            conversationId: conversation._id,
+            isGroup: conversation.isGroup,
+            messages: messages,
+        };
+
+        if (conversation.isGroup) {
+            // Fetch all group users excluding the admin (to prevent duplication)
+            const groupUsers = await User.find({
+                _id: { $in: conversation.users, $nin: [conversation.groupAdmin] },
+            }).select("fullName profilePic");
+
+            // Fetch group admin's details separately and mark them as isAdmin
+            const groupAdmin = await User.findById(conversation.groupAdmin).select(
+                "fullName profilePic"
+            );
+
+            if (groupAdmin) {
+                // Add the group admin with isAdmin flag set to true
+                const groupAdminWithIsAdmin = {
+                    ...groupAdmin.toObject(),
+                    isAdmin: true,
+                };
+                conversationData.groupUsers = [...groupUsers, groupAdminWithIsAdmin];
+            } else {
+                conversationData.groupUsers = groupUsers
+            }
+            conversationData.groupName = conversation.groupName;
+        } else {
+            // For private chat, include the other user's data
+            const otherUser = conversation.users.find(
+                (userId: mongoose.Types.ObjectId) =>
+                    userId.toString() !== user._id.toString()
+            );
+            const otherUserData = await User.findById(otherUser).select(
+                "fullName profilePic"
+            );
+            conversationData.otherUser = otherUserData;
+        }
+
+        // Return response based on whether it's a group or private chat
+        res.status(200).json({
+            message: conversation.isGroup ? "Get group chat" : "Get private chat",
+            success: true,
+            conversation: conversationData,
+        });
     }
-
-    const user = await User.findById(userId);
-
-    if (!user) {
-        throw new CustomError("User not found", 404);
-    }
-
-    const suggestedUsers = await User.find({
-        $and: [
-            { _id: { $ne: userId } },
-            { _id: { $nin: [...(user.sentFriendRequests || []), ...(user.friends || [])] } }
-        ],
-    }).limit(5).select("-password");
-
-    res.status(200).json({ success: true, users: suggestedUsers });
-});
-
-export const fetchFriendRequest = asyncHandler(async (req: Request, res: Response) => {
-    const userId = req?.user?.id;
-
-    if (!userId) {
-        throw new CustomError("UserId not provided", 400);
-    }
-
-    const friendRequests = await FriendRequest.find({
-        isSentTo: userId,
-        status: "pending",
-    }).populate("sentBy", "fullName userName profilePic");
-
-    res.status(200).json({ message: "Fetched friend request!", success: true, requests: friendRequests || [] });
-});
+);
