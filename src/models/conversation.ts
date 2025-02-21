@@ -10,10 +10,7 @@ const conversationSchema = new mongoose.Schema(
         isGroup: { type: Boolean, default: false },
         groupAdmin: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         groupName: { type: String, required: isGroupNameRequired },
-        lastMessage: {
-            message: { type: String },
-            createdAt: { type: Date },
-        },
+        lastMessage: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
         messages: [{ type: mongoose.Schema.Types.ObjectId, ref: "Message" }],
     },
     { timestamps: true }

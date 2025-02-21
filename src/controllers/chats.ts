@@ -5,7 +5,6 @@ import User from "../models/user.js";
 import Conversation from "../models/conversation.js";
 import Message from "../models/message.js";
 import mongoose from "mongoose";
-import { faker } from "@faker-js/faker";
 
 export const getallchats = asyncHandler(async (req: Request, res: Response) => {
   const userId = req?.user?.id;
@@ -30,7 +29,7 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     })
     .populate({
       path: "lastMessage",
-      select: "message createdAt",
+      select: "text type createdAt",
     })
     .sort({ "lastMessage.createdAt": -1 });
 
@@ -61,6 +60,19 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     .status(200)
     .json({ message: "Get all chats", users: chatData, success: true });
 });
+
+const groupMessagesByDay = (messages: any) => {
+  return messages.reduce((acc: any, message: any) => {
+    // Format date as "DD/MM/YYYY"
+    const date = new Date(message.createdAt);
+    const dateKey = new Intl.DateTimeFormat("en-GB").format(date); // Output: "21/02/2025"
+
+    acc[dateKey] = acc[dateKey] || [];
+    acc[dateKey].push(message);
+
+    return acc;
+  }, {});
+};
 
 export const getPrivateChat = asyncHandler(
   async (req: Request, res: Response) => {
@@ -98,7 +110,7 @@ export const getPrivateChat = asyncHandler(
     let conversationData: any = {
       conversationId: conversation._id,
       isGroup: conversation.isGroup,
-      messages: messages,
+      messages: groupMessagesByDay(messages),
     };
 
     if (conversation.isGroup) {
@@ -143,76 +155,3 @@ export const getPrivateChat = asyncHandler(
     });
   }
 );
-
-const generateFakeUser = async () => {
-  // Only assign a googleId if the user is a Google user
-  const user = new User({
-    fullName: faker.person.fullName(),
-    userName: `${faker.person.firstName()}${faker.person.lastName()}`,
-    profilePic: faker.image.avatar(),
-    email: faker.internet.email(),
-    password: "$2b$10$33AH7gY4MkBL3qL2rPfjSezom5M4CzTBlQcokA6ZOjnrnQUG/Hpr6",
-    isGoogleUser: false,
-    googleId: null, // Only use null if not a Google user
-    bio: faker.lorem.sentence(),
-    friends: [],
-    sentFriendRequests: [],
-    conversation: [],
-  });
-  return user;
-};
-
-
-
-const generateFakeUsers = async (count: number) => {
-  const userIds = ["67b5b7740b5b09c8ede19f8d", "67b5b7d70b5b09c8ede19f93"]; // Friend IDs
-  const friends = await User.find({ _id: { $in: userIds } }); // Fetch friends once
-
-  if (friends.length !== userIds.length) {
-    throw new Error("Some friend(s) not found");
-  }
-
-  for (let i = 0; i < count; i++) {
-    const fakeUser = await generateFakeUser(); // Generate fake user
-
-    const user = await fakeUser.save(); // Save user to database
-
-    // Create conversations with friends
-    const conversationPromises = friends.map(async (friend) => {
-      const conversation = new Conversation({
-        users: [user._id, friend._id],
-      });
-
-      const savedConversation = await conversation.save(); // Save conversation first
-
-      // Add the conversation to the user and friend (we will save them later in one go)
-      user.conversation.push(savedConversation._id);
-      friend.conversation.push(savedConversation._id);
-
-      // Also add user as a friend
-      if (!friend.friends.includes(user._id)) {
-        friend.friends.push(user._id); // Add the new user to the friend
-      }
-
-      return savedConversation._id; // Return conversation ID for later use
-    });
-
-    // Wait for all conversations to be created and saved
-    const conversationIds = await Promise.all(conversationPromises);
-
-    // Add the generated conversations to the user’s conversation array
-    user.conversation.push(...conversationIds);
-
-    // Save user and friends after all changes are made
-    await user.save();
-    await Promise.all(friends.map((friend) => friend.save())); // Save all friends
-
-    console.log(`User ${i + 1} saved!`);
-  }
-
-  console.log("All users generated successfully!");
-};
-
-// Call generateFakeUsers to create 10 fake users
-
-// generateFakeUsers(20);
