@@ -13,7 +13,7 @@ const messageSchema = new mongoose.Schema(
             ref: "Conversation",
             required: true,
         },
-        type: { type: String, default: "text", enum: ["text", "image", "video", "gif"] },
+        type: { type: String, default: "text", enum: ["text", "image", "video", "gif","document"] },
         text: { type: String, required: false },
         imageUrl: { type: String, required: false },
         videoUrl: { type: String, required: false },

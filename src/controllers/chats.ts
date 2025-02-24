@@ -5,6 +5,9 @@ import User from "../models/user.js";
 import Conversation from "../models/conversation.js";
 import Message from "../models/message.js";
 import mongoose from "mongoose";
+import { generatePresignedUrl } from "../utils/s3.config.js";
+import { BUCKET_NAME } from "../utils/envConfig.js";
+import { getUniqueMediaName } from "../utils/utils.js";
 
 export const getallchats = asyncHandler(async (req: Request, res: Response) => {
   const userId = req?.user?.id;
@@ -153,5 +156,22 @@ export const getPrivateChat = asyncHandler(
       success: true,
       conversation: conversationData,
     });
+  }
+);
+
+export const generatePresignedurl = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { key, contentType } = req.body;
+
+    const generateName = getUniqueMediaName(key);
+    const actualKey = `chatsMedias/${generateName}`;
+
+    const signedUrl = await generatePresignedUrl(
+      BUCKET_NAME,
+      actualKey,
+      contentType
+    );
+
+    res.status(200).json({ signedUrl, key: actualKey });
   }
 );
