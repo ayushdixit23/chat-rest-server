@@ -29,6 +29,7 @@ const formatChatData = (conversations: any[], userId: string) => {
             text: conversation.lastMessage.text,
             type: conversation.lastMessage.type,
             createdAt: conversation.lastMessage.createdAt,
+            sender: conversation.lastMessage.sender,
           }
         : null,
       users: conversation.users.map((user: any) => ({
@@ -74,6 +75,17 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
         lastMessageCreatedAt: {
           $arrayElemAt: ["$lastMessageData.createdAt", 0],
         },
+        lastMessageSenderId: {
+          $arrayElemAt: ["$lastMessageData.senderId", 0],
+        },
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "lastMessageSenderId",
+        foreignField: "_id",
+        as: "lastMessageSender",
       },
     },
     {
@@ -100,6 +112,14 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
       },
     },
     {
+      $addFields: {
+        "lastMessage.sender": {
+          _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
+          fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
+        },
+      },
+    },
+    {
       $project: {
         _id: 1,
         isGroupChat: 1,
@@ -107,12 +127,17 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
         profilePic: 1,
         users: { _id: 1, fullName: 1, profilePic: 1 },
         groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
-        lastMessage: { $arrayElemAt: ["$lastMessageData", 0] },
+        lastMessage: {
+          $mergeObjects: [
+            { $arrayElemAt: ["$lastMessageData", 0] },
+            { sender: "$lastMessage.sender" },
+          ],
+        },
         createdAt: 1,
       },
     },
   ]);
-
+  
   const chatData = formatChatData(conversations, userId);
   const conversationIds = conversations.map((d) => d._id);
 
@@ -165,15 +190,22 @@ export const getMoreChats = asyncHandler(async (req: Request, res: Response) => 
     },
     {
       $addFields: {
-        lastMessageCreatedAt: {
-          $arrayElemAt: ["$lastMessageData.createdAt", 0],
-        },
+        lastMessageCreatedAt: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+        lastMessageSenderId: { $arrayElemAt: ["$lastMessageData.senderId", 0] },
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "lastMessageSenderId",
+        foreignField: "_id",
+        as: "lastMessageSender",
       },
     },
     {
       $sort: {
-        lastMessageCreatedAt: -1, // Sort by last message first
-        createdAt: -1, // If no messages, sort by conversation creation
+        lastMessageCreatedAt: -1, 
+        createdAt: -1, 
       },
     },
     { $limit: LIMIT },
@@ -194,6 +226,14 @@ export const getMoreChats = asyncHandler(async (req: Request, res: Response) => 
       },
     },
     {
+      $addFields: {
+        "lastMessage.sender": {
+          _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
+          fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
+        },
+      },
+    },
+    {
       $project: {
         _id: 1,
         isGroupChat: 1,
@@ -201,12 +241,17 @@ export const getMoreChats = asyncHandler(async (req: Request, res: Response) => 
         profilePic: 1,
         users: { _id: 1, fullName: 1, profilePic: 1 },
         groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
-        lastMessage: { $arrayElemAt: ["$lastMessageData", 0] },
+        lastMessage: {
+          $mergeObjects: [
+            { $arrayElemAt: ["$lastMessageData", 0] },
+            { sender: "$lastMessage.sender" },
+          ],
+        },
         createdAt: 1,
       },
     },
   ]);
-
+  
   const newConversationIds = moreChats.map(chat => chat._id.toString());
   conversationIdArray = [...conversationIdArray, ...newConversationIds];
 
