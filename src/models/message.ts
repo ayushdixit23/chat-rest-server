@@ -20,8 +20,8 @@ const messageSchema = new mongoose.Schema(
         gifUrl: { type: String, required: false },
         deletedfor: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
         status: { type: String, default: "active", enum: ["active", "deleted"] },
+        createdAt: { type: Date },
     },
-    { timestamps: true }
 );
 
 const Message = mongoose.model("Message", messageSchema);
