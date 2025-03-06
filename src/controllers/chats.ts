@@ -5,7 +5,10 @@ import User from "../models/user.js";
 import Conversation from "../models/conversation.js";
 import Message from "../models/message.js";
 import mongoose from "mongoose";
-import { generatePresignedUrl } from "../utils/s3.config.js";
+import {
+  generateDownloadUrl,
+  generatePresignedUrl,
+} from "../utils/s3.config.js";
 import { BUCKET_NAME } from "../utils/envConfig.js";
 import { getUniqueMediaName } from "../utils/utils.js";
 
@@ -137,7 +140,7 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
       },
     },
   ]);
-  
+
   const chatData = formatChatData(conversations, userId);
   const conversationIds = conversations.map((d) => d._id);
 
@@ -150,128 +153,144 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
-export const getMoreChats = asyncHandler(async (req: Request, res: Response) => {
-  const { conversationIds } = req.query;
-  const userId = req?.user?.id;
-  const LIMIT = 10;
+export const getMoreChats = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { conversationIds } = req.query;
+    const userId = req?.user?.id;
+    const LIMIT = 10;
 
-  if (!userId) throw new CustomError("UserId not provided", 400);
+    if (!userId) throw new CustomError("UserId not provided", 400);
 
-  let conversationIdArray: string[] = [];
+    let conversationIdArray: string[] = [];
 
-  if (typeof conversationIds === "string") {
-    try {
-      conversationIdArray = JSON.parse(conversationIds);
-      if (!Array.isArray(conversationIdArray) || !conversationIdArray.every(id => typeof id === "string")) {
-        throw new Error("Invalid conversationIds format");
+    if (typeof conversationIds === "string") {
+      try {
+        conversationIdArray = JSON.parse(conversationIds);
+        if (
+          !Array.isArray(conversationIdArray) ||
+          !conversationIdArray.every((id) => typeof id === "string")
+        ) {
+          throw new Error("Invalid conversationIds format");
+        }
+      } catch (error) {
+        return res
+          .status(400)
+          .json({ message: "Invalid conversationIds format" });
       }
-    } catch (error) {
-      return res.status(400).json({ message: "Invalid conversationIds format" });
+    } else if (Array.isArray(conversationIds)) {
+      conversationIdArray = conversationIds.map((id) => String(id));
     }
-  } else if (Array.isArray(conversationIds)) {
-    conversationIdArray = conversationIds.map(id => String(id));
+
+    const moreChats = await Conversation.aggregate([
+      {
+        $match: {
+          users: new mongoose.Types.ObjectId(userId),
+          _id: {
+            $nin: conversationIdArray.map(
+              (id) => new mongoose.Types.ObjectId(id)
+            ),
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "messages",
+          localField: "lastMessage",
+          foreignField: "_id",
+          as: "lastMessageData",
+        },
+      },
+      {
+        $addFields: {
+          lastMessageCreatedAt: {
+            $arrayElemAt: ["$lastMessageData.createdAt", 0],
+          },
+          lastMessageSenderId: {
+            $arrayElemAt: ["$lastMessageData.senderId", 0],
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "lastMessageSenderId",
+          foreignField: "_id",
+          as: "lastMessageSender",
+        },
+      },
+      {
+        $sort: {
+          lastMessageCreatedAt: -1,
+          createdAt: -1,
+        },
+      },
+      { $limit: LIMIT },
+      {
+        $lookup: {
+          from: "users",
+          localField: "users",
+          foreignField: "_id",
+          as: "users",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "groupAdmin",
+          foreignField: "_id",
+          as: "groupAdmin",
+        },
+      },
+      {
+        $addFields: {
+          "lastMessage.sender": {
+            _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
+            fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          isGroupChat: 1,
+          chatName: 1,
+          profilePic: 1,
+          users: { _id: 1, fullName: 1, profilePic: 1 },
+          groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
+          lastMessage: {
+            $mergeObjects: [
+              { $arrayElemAt: ["$lastMessageData", 0] },
+              { sender: "$lastMessage.sender" },
+            ],
+          },
+          createdAt: 1,
+        },
+      },
+    ]);
+
+    const newConversationIds = moreChats.map((chat) => chat._id.toString());
+    conversationIdArray = [...conversationIdArray, ...newConversationIds];
+
+    // Check if more chats exist
+    const remainingConversations = await Conversation.countDocuments({
+      _id: {
+        $nin: conversationIdArray.map((id) => new mongoose.Types.ObjectId(id)),
+      },
+      users: new mongoose.Types.ObjectId(userId),
+    });
+    const hasMore = remainingConversations > 0;
+
+    const chatData = formatChatData(moreChats, userId);
+
+    res.status(200).json({
+      message: "More chats fetched",
+      success: true,
+      hasMore,
+      users: chatData,
+      conversationIds: conversationIdArray,
+    });
   }
-
-
-  const moreChats = await Conversation.aggregate([
-    {
-      $match: {
-        users: new mongoose.Types.ObjectId(userId),
-        _id: { $nin: conversationIdArray.map(id => new mongoose.Types.ObjectId(id)) },
-      },
-    },
-    {
-      $lookup: {
-        from: "messages",
-        localField: "lastMessage",
-        foreignField: "_id",
-        as: "lastMessageData",
-      },
-    },
-    {
-      $addFields: {
-        lastMessageCreatedAt: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
-        lastMessageSenderId: { $arrayElemAt: ["$lastMessageData.senderId", 0] },
-      },
-    },
-    {
-      $lookup: {
-        from: "users",
-        localField: "lastMessageSenderId",
-        foreignField: "_id",
-        as: "lastMessageSender",
-      },
-    },
-    {
-      $sort: {
-        lastMessageCreatedAt: -1, 
-        createdAt: -1, 
-      },
-    },
-    { $limit: LIMIT },
-    {
-      $lookup: {
-        from: "users",
-        localField: "users",
-        foreignField: "_id",
-        as: "users",
-      },
-    },
-    {
-      $lookup: {
-        from: "users",
-        localField: "groupAdmin",
-        foreignField: "_id",
-        as: "groupAdmin",
-      },
-    },
-    {
-      $addFields: {
-        "lastMessage.sender": {
-          _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
-          fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
-        },
-      },
-    },
-    {
-      $project: {
-        _id: 1,
-        isGroupChat: 1,
-        chatName: 1,
-        profilePic: 1,
-        users: { _id: 1, fullName: 1, profilePic: 1 },
-        groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
-        lastMessage: {
-          $mergeObjects: [
-            { $arrayElemAt: ["$lastMessageData", 0] },
-            { sender: "$lastMessage.sender" },
-          ],
-        },
-        createdAt: 1,
-      },
-    },
-  ]);
-  
-  const newConversationIds = moreChats.map(chat => chat._id.toString());
-  conversationIdArray = [...conversationIdArray, ...newConversationIds];
-
-  // Check if more chats exist
-  const remainingConversations = await Conversation.countDocuments({
-    _id: { $nin: conversationIdArray.map(id => new mongoose.Types.ObjectId(id)) },
-    users: new mongoose.Types.ObjectId(userId),
-  });
-  const hasMore = remainingConversations > 0;
-
-  const chatData = formatChatData(moreChats, userId);
-
-  res.status(200).json({
-    message: "More chats fetched",
-    success: true,
-    hasMore,
-    users: chatData,
-    conversationIds: conversationIdArray, 
-  });
-});
+);
 
 const groupMessagesByDay = (messages: any) => {
   return messages.reduce((acc: any, message: any) => {
@@ -300,6 +319,19 @@ export const generatePresignedurl = asyncHandler(
     );
 
     res.status(200).json({ signedUrl, key: actualKey });
+  }
+);
+
+export const getDownloadUrl = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { url } = req.body;
+
+    if (!url) throw new CustomError("Url not provided", 400);
+
+    const fileName = url.split(".net/").pop();
+
+    const signedUrl = await generateDownloadUrl(BUCKET_NAME, fileName);
+    res.status(200).json({url: signedUrl });
   }
 );
 
@@ -341,12 +373,12 @@ export const getOlderMessages = asyncHandler(
     const chronologicalMessages = messages.reverse();
 
     const hasMore =
-    messages.length === LIMIT &&
-    (await Message.exists({
-      conversationId,
-      createdAt: { $lt: messages[messages.length - 1].createdAt }, // Check if an older message exists
-    })) !== null;
-    
+      messages.length === LIMIT &&
+      (await Message.exists({
+        conversationId,
+        createdAt: { $lt: messages[messages.length - 1].createdAt }, // Check if an older message exists
+      })) !== null;
+
     // Group messages by date
     const messagesSent = groupMessagesByDay(chronologicalMessages);
     res.status(200).json({

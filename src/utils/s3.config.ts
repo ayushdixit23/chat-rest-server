@@ -1,5 +1,6 @@
 import {
     DeleteObjectCommand,
+    GetObjectCommand,
     PutObjectCommand,
     S3Client,
   } from "@aws-sdk/client-s3";
@@ -71,5 +72,24 @@ import {
   
     return signedUrl;
   }
+
+  async function generateDownloadUrl(
+    bucketName: string,
+    fileName: string,
+  ) {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: bucketName,
+      Key: fileName,
+    });
+
+    // Generate a pre-signed URL valid for 5 minutes
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3000 });
+
+    return signedUrl;
+  } catch (error) {
+    console.error("Error generating signed URL:", error);
+  }
+  }
   
-  export { s3Client, deleteFiles3, uploadToS3, generatePresignedUrl };
+  export { s3Client, deleteFiles3, uploadToS3, generatePresignedUrl,generateDownloadUrl };
