@@ -17,15 +17,14 @@ const formatChatData = (conversations: any[], userId: string) => {
     const otherUsers = conversation.users.filter(
       (user: any) => user._id.toString() !== userId
     );
-
     return {
       _id: conversation._id,
-      isGroupChat: conversation.isGroupChat,
-      chatName: conversation.isGroupChat
-        ? conversation.chatName
+      isGroup: conversation.isGroup,
+      chatName: conversation.isGroup
+        ? conversation.groupName
         : otherUsers[0]?.fullName || "Unknown",
-      profilePic: conversation.isGroupChat
-        ? null
+      profilePic: conversation.isGroup
+        ? conversation.groupPic
         : otherUsers[0]?.profilePic || "",
       lastMessage: conversation.lastMessage
         ? {
@@ -125,8 +124,10 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     {
       $project: {
         _id: 1,
-        isGroupChat: 1,
         chatName: 1,
+        isGroup: 1,
+        groupName: 1,
+        groupPic: 1, 
         profilePic: 1,
         users: { _id: 1, fullName: 1, profilePic: 1 },
         groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
@@ -252,9 +253,11 @@ export const getMoreChats = asyncHandler(
       {
         $project: {
           _id: 1,
-          isGroupChat: 1,
           chatName: 1,
           profilePic: 1,
+          isGroup: 1,
+          groupName: 1,
+          groupPic: 1, 
           users: { _id: 1, fullName: 1, profilePic: 1 },
           groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
           lastMessage: {
@@ -453,6 +456,7 @@ export const getPrivateChat = asyncHandler(
         ? [...groupUsers, { ...groupAdmin.toObject(), isAdmin: true }]
         : groupUsers;
       conversationData.groupName = conversation.groupName;
+      conversationData.groupPic = conversation.groupPic;
     } else {
       const otherUser = conversation.users.find(
         (id: mongoose.Types.ObjectId) => id.toString() !== user._id.toString()

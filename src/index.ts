@@ -9,6 +9,7 @@ import { errorMiddleware } from "./middlewares/errors/errorMiddleware.js";
 import { CustomError } from "./middlewares/errors/CustomError.js";
 import chatsRouter from "./routes/chats.js";
 import friendRequestsRouter from "./routes/friend-request.js";
+import groupRouter from "./routes/group.js";
 import { rateLimit } from 'express-rate-limit'
 
 const limiter = rateLimit({
@@ -74,6 +75,7 @@ app.get("/api/error", (_, res) => {
 
 app.use("/api/chats", chatsRouter);
 app.use("/api/chats", friendRequestsRouter);
+app.use("/api/chats", groupRouter);
 
 // 404 Handler for non-existent routes (must come after routes)
 app.use((_, res) => {

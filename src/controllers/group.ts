@@ -7,6 +7,7 @@ import { getUniqueMediaName } from "../utils/utils.js";
 import Message from "../models/message.js";
 import { BUCKET_NAME, CLOUDFRONT_URL } from "../utils/envConfig.js";
 import { uploadToS3 } from "../utils/s3.config.js";
+import mongoose from "mongoose";
 
 export const createGroup = asyncHandler(async (req: Request, res: Response) => {
     const userId = req?.user?.id;
@@ -142,6 +143,7 @@ export const addMembersToGroup = asyncHandler(async (req: Request, res: Response
 
     // Validate all members are friends with the user
     for (const user of users) {
+        console.log(user,"user")
         if (!user.friends.some((friendId) => friendId.equals(userId))) {
             throw new CustomError("Only friends can be added", 400);
         }
@@ -203,4 +205,99 @@ export const removeMembersFromGroup = asyncHandler(async (req: Request, res: Res
         success: true,
         group: updatedGroup,
     });
-}); 
+});
+
+export const fetchGroups = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.id;
+
+    if (!userId) {
+        throw new CustomError("UserId not provided", 400);
+    }
+
+    const groups = await Conversation.aggregate([
+        {
+            $match: {
+                isGroup: true,
+                users: new mongoose.Types.ObjectId(userId),
+            },
+        },
+        {
+            $lookup: {
+                from: "lastMessage",
+                localField: "lastMessage",
+                foreignField: "_id",
+                as: "lastMessageData",
+            },
+        },
+        {
+            $addFields: {
+                lastMessageCreatedAt: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+                lastMessageSenderId: { $arrayElemAt: ["$lastMessageData.senderId", 0] },
+            },
+        },
+        {
+            $lookup: {
+                from: "users",
+                localField: "lastMessageSenderId",
+                foreignField: "_id",
+                as: "lastMessageSender",
+            },
+        },
+        {
+            $sort: {
+                lastMessageCreatedAt: -1, // Sort by last message timestamp
+                createdAt: -1, // If no messages, sort by group creation
+            },
+        },
+        {
+            $lookup: {
+                from: "users",
+                localField: "users",
+                foreignField: "_id",
+                as: "users",
+            },
+        },
+        {
+            $lookup: {
+                from: "users",
+                localField: "groupAdmin",
+                foreignField: "_id",
+                as: "groupAdmin",
+            },
+        },
+        {
+            $addFields: {
+                lastMessage: {
+                    _id: { $arrayElemAt: ["$lastMessageData._id", 0] },
+                    content: { $arrayElemAt: ["$lastMessageData.content", 0] },
+                    createdAt: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+                    sender: {
+                        _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
+                        fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
+                    },
+                },
+            },
+        },
+        {
+            $project: {
+                _id: 1,
+                groupName: 1, // Ensure group name is included
+                groupPic: 1,  // Ensure group picture is included
+                users: { _id: 1, fullName: 1, profilePic: 1 },
+                groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
+                lastMessage: 1, // Ensure lastMessage has correct structure
+                createdAt: 1,
+            },
+        },
+    ]);
+
+    console.log(groups)
+    
+    res.status(200).json({
+        success: true,
+        groups,
+    });
+    
+});
+
+
