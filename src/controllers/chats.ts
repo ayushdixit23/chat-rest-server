@@ -28,11 +28,11 @@ const formatChatData = (conversations: any[], userId: string) => {
         : otherUsers[0]?.profilePic || "",
       lastMessage: conversation.lastMessage
         ? {
-            text: conversation.lastMessage.text,
-            type: conversation.lastMessage.type,
-            createdAt: conversation.lastMessage.createdAt,
-            sender: conversation.lastMessage.sender,
-          }
+          text: conversation.lastMessage.text,
+          type: conversation.lastMessage.type,
+          createdAt: conversation.lastMessage.createdAt,
+          sender: conversation.lastMessage.sender,
+        }
         : null,
       users: conversation.users.map((user: any) => ({
         _id: user._id,
@@ -41,10 +41,10 @@ const formatChatData = (conversations: any[], userId: string) => {
       })),
       groupAdmin: conversation.groupAdmin
         ? {
-            _id: conversation.groupAdmin._id,
-            fullName: conversation.groupAdmin.fullName,
-            profilePic: conversation.groupAdmin.profilePic || "",
-          }
+          _id: conversation.groupAdmin._id,
+          fullName: conversation.groupAdmin.fullName,
+          profilePic: conversation.groupAdmin.profilePic || "",
+        }
         : null,
       createdAt: conversation.createdAt,
     };
@@ -74,12 +74,8 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     },
     {
       $addFields: {
-        lastMessageCreatedAt: {
-          $arrayElemAt: ["$lastMessageData.createdAt", 0],
-        },
-        lastMessageSenderId: {
-          $arrayElemAt: ["$lastMessageData.senderId", 0],
-        },
+        lastMessageCreatedAt: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+        lastMessageSenderId: { $arrayElemAt: ["$lastMessageData.senderId", 0] },
       },
     },
     {
@@ -92,8 +88,8 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     },
     {
       $sort: {
-        lastMessageCreatedAt: -1, // Sort by last message date first
-        createdAt: -1, // If no messages, sort by conversation creation
+        lastMessageCreatedAt: -1,
+        createdAt: -1,
       },
     },
     { $limit: LIMIT },
@@ -127,7 +123,7 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
         chatName: 1,
         isGroup: 1,
         groupName: 1,
-        groupPic: 1, 
+        groupPic: 1,
         profilePic: 1,
         users: { _id: 1, fullName: 1, profilePic: 1 },
         groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
@@ -145,14 +141,207 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
   const chatData = formatChatData(conversations, userId);
   const conversationIds = conversations.map((d) => d._id);
 
+  // Optimize unread message counting using aggregation instead of looping over each conversation
+  const unreadMessagesPerConversation = await Message.aggregate([
+    {
+      $match: {
+        conversationId: { $in: conversationIds },
+        isSeen: false,
+      },
+    },
+    {
+      $group: {
+        _id: "$conversationId",
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  // Convert unread messages to a map for quick lookup
+  const unreadMessagesMap = new Map(
+    unreadMessagesPerConversation.map(({ _id, count }) => [_id.toString(), count])
+  );
+
+  // Merge unread messages count into chatData
+  const newData = chatData.map((chat) => ({
+    ...chat,
+    unreadMessages: unreadMessagesMap.get(chat._id.toString()) || 0,
+  }));
+
   res.status(200).json({
     message: "Fetched recent chats",
-    users: chatData,
+    users: newData,
     conversationIds,
     hasMore: conversations.length === LIMIT,
     success: true,
   });
 });
+
+
+// export const getMoreChats = asyncHandler(
+//   async (req: Request, res: Response) => {
+//     const { conversationIds } = req.query;
+//     const userId = req?.user?.id;
+//     const LIMIT = 10;
+
+//     if (!userId) throw new CustomError("UserId not provided", 400);
+
+//     let conversationIdArray: string[] = [];
+
+//     if (typeof conversationIds === "string") {
+//       try {
+//         conversationIdArray = JSON.parse(conversationIds);
+//         if (
+//           !Array.isArray(conversationIdArray) ||
+//           !conversationIdArray.every((id) => typeof id === "string")
+//         ) {
+//           throw new Error("Invalid conversationIds format");
+//         }
+//       } catch (error) {
+//         return res
+//           .status(400)
+//           .json({ message: "Invalid conversationIds format" });
+//       }
+//     } else if (Array.isArray(conversationIds)) {
+//       conversationIdArray = conversationIds.map((id) => String(id));
+//     }
+
+//     const moreChats = await Conversation.aggregate([
+//       {
+//         $match: {
+//           users: new mongoose.Types.ObjectId(userId),
+//           _id: {
+//             $nin: conversationIdArray.map(
+//               (id) => new mongoose.Types.ObjectId(id)
+//             ),
+//           },
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "messages",
+//           localField: "lastMessage",
+//           foreignField: "_id",
+//           as: "lastMessageData",
+//         },
+//       },
+//       {
+//         $addFields: {
+//           lastMessageCreatedAt: {
+//             $arrayElemAt: ["$lastMessageData.createdAt", 0],
+//           },
+//           lastMessageSenderId: {
+//             $arrayElemAt: ["$lastMessageData.senderId", 0],
+//           },
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "users",
+//           localField: "lastMessageSenderId",
+//           foreignField: "_id",
+//           as: "lastMessageSender",
+//         },
+//       },
+//       {
+//         $sort: {
+//           lastMessageCreatedAt: -1,
+//           createdAt: -1,
+//         },
+//       },
+//       { $limit: LIMIT },
+//       {
+//         $lookup: {
+//           from: "users",
+//           localField: "users",
+//           foreignField: "_id",
+//           as: "users",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "users",
+//           localField: "groupAdmin",
+//           foreignField: "_id",
+//           as: "groupAdmin",
+//         },
+//       },
+//       {
+//         $addFields: {
+//           "lastMessage.sender": {
+//             _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
+//             fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
+//           },
+//         },
+//       },
+//       {
+//         $project: {
+//           _id: 1,
+//           chatName: 1,
+//           profilePic: 1,
+//           isGroup: 1,
+//           groupName: 1,
+//           groupPic: 1,
+//           users: { _id: 1, fullName: 1, profilePic: 1 },
+//           groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
+//           lastMessage: {
+//             $mergeObjects: [
+//               { $arrayElemAt: ["$lastMessageData", 0] },
+//               { sender: "$lastMessage.sender" },
+//             ],
+//           },
+//           createdAt: 1,
+//         },
+//       },
+//     ]);
+
+//     const newConversationIds = moreChats.map((chat) => chat._id.toString());
+//     conversationIdArray = [...conversationIdArray, ...newConversationIds];
+
+//     // Check if more chats exist
+//     const remainingConversations = await Conversation.countDocuments({
+//       _id: {
+//         $nin: conversationIdArray.map((id) => new mongoose.Types.ObjectId(id)),
+//       },
+//       users: new mongoose.Types.ObjectId(userId),
+//     });
+//     const hasMore = remainingConversations > 0;
+
+//     const chatData = formatChatData(moreChats, userId);
+
+//     let unreadMessagesPerConversation = []
+//       for (let i = 0; i < moreChats.length; i++) {
+//         const conversation = moreChats[i];
+    
+//         const messages = await Message.countDocuments({ conversationId: conversation._id, isSeen: false })
+//         const data = {
+//           count: messages,
+//           conversationId: conversation._id
+//         }
+//         unreadMessagesPerConversation.push(data)
+//       }
+    
+//       const newData = chatData.map((chat) => {
+//         const unreadMessages = unreadMessagesPerConversation.find(
+//           (message) => message.conversationId.toString() === chat._id.toString()
+//         );
+//         return {
+//           ...chat,
+//           unreadMessages: unreadMessages ? unreadMessages.count : 0,
+//         };
+//       });
+    
+
+//     res.status(200).json({
+//       message: "More chats fetched",
+//       success: true,
+//       hasMore,
+//       // users: chatData,
+//       users:newData,
+//       conversationIds: conversationIdArray,
+//     });
+//   }
+// );
 
 export const getMoreChats = asyncHandler(
   async (req: Request, res: Response) => {
@@ -167,16 +356,11 @@ export const getMoreChats = asyncHandler(
     if (typeof conversationIds === "string") {
       try {
         conversationIdArray = JSON.parse(conversationIds);
-        if (
-          !Array.isArray(conversationIdArray) ||
-          !conversationIdArray.every((id) => typeof id === "string")
-        ) {
+        if (!Array.isArray(conversationIdArray) || !conversationIdArray.every((id) => typeof id === "string")) {
           throw new Error("Invalid conversationIds format");
         }
       } catch (error) {
-        return res
-          .status(400)
-          .json({ message: "Invalid conversationIds format" });
+        return res.status(400).json({ message: "Invalid conversationIds format" });
       }
     } else if (Array.isArray(conversationIds)) {
       conversationIdArray = conversationIds.map((id) => String(id));
@@ -187,9 +371,7 @@ export const getMoreChats = asyncHandler(
         $match: {
           users: new mongoose.Types.ObjectId(userId),
           _id: {
-            $nin: conversationIdArray.map(
-              (id) => new mongoose.Types.ObjectId(id)
-            ),
+            $nin: conversationIdArray.map((id) => new mongoose.Types.ObjectId(id)),
           },
         },
       },
@@ -203,12 +385,8 @@ export const getMoreChats = asyncHandler(
       },
       {
         $addFields: {
-          lastMessageCreatedAt: {
-            $arrayElemAt: ["$lastMessageData.createdAt", 0],
-          },
-          lastMessageSenderId: {
-            $arrayElemAt: ["$lastMessageData.senderId", 0],
-          },
+          lastMessageCreatedAt: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+          lastMessageSenderId: { $arrayElemAt: ["$lastMessageData.senderId", 0] },
         },
       },
       {
@@ -220,10 +398,7 @@ export const getMoreChats = asyncHandler(
         },
       },
       {
-        $sort: {
-          lastMessageCreatedAt: -1,
-          createdAt: -1,
-        },
+        $sort: { lastMessageCreatedAt: -1, createdAt: -1 },
       },
       { $limit: LIMIT },
       {
@@ -257,7 +432,7 @@ export const getMoreChats = asyncHandler(
           profilePic: 1,
           isGroup: 1,
           groupName: 1,
-          groupPic: 1, 
+          groupPic: 1,
           users: { _id: 1, fullName: 1, profilePic: 1 },
           groupAdmin: { _id: 1, fullName: 1, profilePic: 1 },
           lastMessage: {
@@ -271,29 +446,51 @@ export const getMoreChats = asyncHandler(
       },
     ]);
 
+    if (!Array.isArray(moreChats)) {
+      return res.status(500).json({ message: "Unexpected response format" });
+    }
+
     const newConversationIds = moreChats.map((chat) => chat._id.toString());
     conversationIdArray = [...conversationIdArray, ...newConversationIds];
 
     // Check if more chats exist
     const remainingConversations = await Conversation.countDocuments({
-      _id: {
-        $nin: conversationIdArray.map((id) => new mongoose.Types.ObjectId(id)),
-      },
+      _id: { $nin: conversationIdArray.map((id) => new mongoose.Types.ObjectId(id)) },
       users: new mongoose.Types.ObjectId(userId),
     });
+
     const hasMore = remainingConversations > 0;
 
     const chatData = formatChatData(moreChats, userId);
+
+    // Fetch unread messages for all conversations in parallel
+    const unreadMessagesPerConversation = await Promise.all(
+      moreChats.map(async (conversation) => {
+        const count = await Message.countDocuments({ conversationId: conversation._id, isSeen: false });
+        return { count, conversationId: conversation._id.toString() };
+      })
+    );
+
+    const newData = chatData.map((chat) => {
+      const unreadMessages = unreadMessagesPerConversation.find(
+        (message) => message.conversationId === chat._id.toString()
+      );
+      return {
+        ...chat,
+        unreadMessages: unreadMessages ? unreadMessages.count : 0,
+      };
+    });
 
     res.status(200).json({
       message: "More chats fetched",
       success: true,
       hasMore,
-      users: chatData,
+      users: newData,
       conversationIds: conversationIdArray,
     });
   }
 );
+
 
 const groupMessagesByDay = (messages: any) => {
   return messages.reduce((acc: any, message: any) => {
@@ -334,7 +531,7 @@ export const getDownloadUrl = asyncHandler(
     const fileName = url.split(".net/").pop();
 
     const signedUrl = await generateDownloadUrl(BUCKET_NAME, fileName);
-    res.status(200).json({url: signedUrl });
+    res.status(200).json({ url: signedUrl });
   }
 );
 

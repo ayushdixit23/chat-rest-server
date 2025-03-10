@@ -25,8 +25,10 @@ const messageSchema = new mongoose.Schema(
         },
         deletedfor: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
         status: { type: String, default: "active", enum: ["active", "deleted"] },
+        seenBy: { type: [mongoose.Schema.Types.ObjectId], ref: "User", default: [] },
+        isSeen: { type: Boolean, default: false },
         createdAt: { type: Date },
-    },
+    }
 );
 
 const Message = mongoose.model("Message", messageSchema);
