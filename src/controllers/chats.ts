@@ -32,6 +32,8 @@ const formatChatData = (conversations: any[], userId: string) => {
           type: conversation.lastMessage.type,
           createdAt: conversation.lastMessage.createdAt,
           sender: conversation.lastMessage.sender,
+          status: conversation.lastMessage.status,
+          mesId: conversation.lastMessage.mesId,
         }
         : null,
       users: conversation.users.map((user: any) => ({
@@ -115,6 +117,8 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
           _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
           fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
         },
+        "lastMessage.status": { $arrayElemAt: ["$lastMessageData.status", 0] },
+        "lastMessage.mesId": { $arrayElemAt: ["$lastMessageData.mesId", 0] },
       },
     },
     {
@@ -131,6 +135,8 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
           $mergeObjects: [
             { $arrayElemAt: ["$lastMessageData", 0] },
             { sender: "$lastMessage.sender" },
+            { status: "$lastMessage.status" },
+            { mesId: "$lastMessage.mesId" },
           ],
         },
         createdAt: 1,
@@ -160,7 +166,7 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
       },
     },
   ]);
-  
+
   // Convert unread messages to a map for quick lookup
   const unreadMessagesMap = new Map(
     unreadMessagesPerConversation.map(({ _id, count }) => [_id.toString(), count])
@@ -180,6 +186,7 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     success: true,
   });
 });
+
 
 export const getMoreChats = asyncHandler(
   async (req: Request, res: Response) => {
@@ -393,11 +400,11 @@ export const getOlderMessages = asyncHandler(
     }
 
     // Build query for fetching older messages
-    const query: any = { conversationId };
+    const query: any = { conversationId,deletedfor: { $ne: userId } };
     if (lastMessageId) {
       const lastMessage = await Message.findById(lastMessageId);
       if (!lastMessage) throw new CustomError("Last message not found", 404);
-      query.createdAt = { $lt: lastMessage.createdAt }; // Get messages older than lastMessageId
+      query.createdAt = { $lt: lastMessage.createdAt };// Get messages older than lastMessageId
     }
 
     // Fetch messages in descending order (newest to oldest), then reverse for display
@@ -457,8 +464,9 @@ export const getPrivateChat = asyncHandler(
     const skip = Math.max(0, totalMessages - LIMIT);
 
     // Fetch the most recent messages based on the LIMIT
-    const messages = await Message.find({ conversationId })
-      .sort({ createdAt: 1 }) // Sort in ascending order
+    const messages = await Message.find({ conversationId, deletedfor: { $ne: userId } })
+      .sort({ createdAt: 1 })// Sort in ascending order
+
       .skip(skip) // Skip older messages to get only the most recent ones
       .limit(LIMIT)
       .populate("senderId", "fullName profilePic");
@@ -512,8 +520,8 @@ const deleteAllMessages = async () => {
   try {
     await Message.deleteMany({});
 
-    await Conversation.updateMany({}, { 
-      $set: { lastMessage: null, messages: [] } 
+    await Conversation.updateMany({}, {
+      $set: { lastMessage: null, messages: [] }
     });
 
     console.log("All messages deleted and conversations updated.");
