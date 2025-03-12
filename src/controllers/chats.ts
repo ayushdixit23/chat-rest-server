@@ -69,8 +69,17 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     {
       $lookup: {
         from: "messages",
-        localField: "lastMessage",
-        foreignField: "_id",
+        let: { conversationId: "$_id" },
+        pipeline: [
+          { $match: { $expr: { $eq: ["$conversationId", "$$conversationId"] } } },
+          { $sort: { createdAt: -1 } }, 
+          { 
+            $match: { 
+              deletedfor: { $ne: new mongoose.Types.ObjectId(userId) } 
+            } 
+          },
+          { $limit: 1 }, 
+        ],
         as: "lastMessageData",
       },
     },
@@ -143,6 +152,7 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
       },
     },
   ]);
+  
 
   const chatData = formatChatData(conversations, userId);
   const conversationIds = conversations.map((d) => d._id);
@@ -223,8 +233,27 @@ export const getMoreChats = asyncHandler(
       {
         $lookup: {
           from: "messages",
-          localField: "lastMessage",
-          foreignField: "_id",
+          let: { lastMessageId: "$lastMessage", userId: new mongoose.Types.ObjectId(userId) },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: ["$_id", "$$lastMessageId"],
+                },
+              },
+            },
+            {
+              $match: {
+                deletedfor: { $not: { $in: [new mongoose.Types.ObjectId(userId)] } },
+              },
+            },
+            {
+              $sort: { createdAt: -1 },
+            },
+            {
+              $limit: 1,
+            },
+          ],
           as: "lastMessageData",
         },
       },
@@ -268,6 +297,8 @@ export const getMoreChats = asyncHandler(
             _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
             fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
           },
+          "lastMessage.status": { $arrayElemAt: ["$lastMessageData.status", 0] },
+          "lastMessage.mesId": { $arrayElemAt: ["$lastMessageData.mesId", 0] },
         },
       },
       {
@@ -284,12 +315,15 @@ export const getMoreChats = asyncHandler(
             $mergeObjects: [
               { $arrayElemAt: ["$lastMessageData", 0] },
               { sender: "$lastMessage.sender" },
+              { status: "$lastMessage.status" },
+              { mesId: "$lastMessage.mesId" },
             ],
           },
           createdAt: 1,
         },
       },
     ]);
+    
 
     if (!Array.isArray(moreChats)) {
       return res.status(500).json({ message: "Unexpected response format" });
