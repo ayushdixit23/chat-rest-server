@@ -72,13 +72,13 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
         let: { conversationId: "$_id" },
         pipeline: [
           { $match: { $expr: { $eq: ["$conversationId", "$$conversationId"] } } },
-          { $sort: { createdAt: -1 } }, 
-          { 
-            $match: { 
-              deletedfor: { $ne: new mongoose.Types.ObjectId(userId) } 
-            } 
+          { $sort: { createdAt: -1 } },
+          {
+            $match: {
+              deletedfor: { $ne: new mongoose.Types.ObjectId(userId) }
+            }
           },
-          { $limit: 1 }, 
+          { $limit: 1 },
         ],
         as: "lastMessageData",
       },
@@ -152,7 +152,7 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
       },
     },
   ]);
-  
+
 
   const chatData = formatChatData(conversations, userId);
   const conversationIds = conversations.map((d) => d._id);
@@ -196,7 +196,6 @@ export const getallchats = asyncHandler(async (req: Request, res: Response) => {
     success: true,
   });
 });
-
 
 export const getMoreChats = asyncHandler(
   async (req: Request, res: Response) => {
@@ -323,7 +322,7 @@ export const getMoreChats = asyncHandler(
         },
       },
     ]);
-    
+
 
     if (!Array.isArray(moreChats)) {
       return res.status(500).json({ message: "Unexpected response format" });
@@ -434,7 +433,7 @@ export const getOlderMessages = asyncHandler(
     }
 
     // Build query for fetching older messages
-    const query: any = { conversationId,deletedfor: { $ne: userId } };
+    const query: any = { conversationId, deletedfor: { $ne: userId } };
     if (lastMessageId) {
       const lastMessage = await Message.findById(lastMessageId);
       if (!lastMessage) throw new CustomError("Last message not found", 404);
@@ -491,6 +490,22 @@ export const getPrivateChat = asyncHandler(
       throw new CustomError("You are not a part of this conversation", 400);
     }
 
+    const ObjectIdConversationId = new mongoose.Types.ObjectId(conversationId)
+
+    const isBlockedByYou = user.blockedConversations.includes(ObjectIdConversationId);
+
+    let isBlockedByUser = false;
+    if (!conversation.isGroup) {
+      const otherUserId = conversation.users.find(
+        (id: mongoose.Types.ObjectId) => id.toString() !== user._id.toString()
+      );
+
+      if (otherUserId) {
+        const otherUser = await User.findById(otherUserId);
+        isBlockedByUser = otherUser?.blockedConversations.includes(ObjectIdConversationId) || false;
+      }
+    }
+
     // Get total message count
     const totalMessages = await Message.countDocuments({ conversationId });
 
@@ -517,6 +532,8 @@ export const getPrivateChat = asyncHandler(
       isGroup: conversation.isGroup,
       messages: groupedMessages,
       hasMore,
+      isBlockedByYou,
+      isBlockedByUser,
     };
 
     if (conversation.isGroup) {
