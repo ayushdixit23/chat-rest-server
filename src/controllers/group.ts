@@ -301,11 +301,38 @@ export const fetchGroups = asyncHandler(async (req: Request, res: Response) => {
         },
     ]);    
 
-    console.log(groups)
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
+    const conversationIds = groups.map((d) => d._id);
+     const unreadMessagesPerConversation = await Message.aggregate([
+        {
+          $match: {
+            conversationId: { $in: conversationIds },
+            senderId: { $ne: userObjectId },
+            seenBy: { $nin: [userObjectId] }, 
+          },
+        },
+        {
+          $group: {
+            _id: "$conversationId",
+            count: { $sum: 1 },
+          },
+        },
+      ]);
+
+      const unreadMessagesMap = new Map(
+        unreadMessagesPerConversation.map(({ _id, count }) => [_id.toString(), count])
+      );
+    
+      // Merge unread messages count into chatData
+      const newData = groups.map((chat) => ({
+        ...chat,
+        unreadMessages: unreadMessagesMap.get(chat._id.toString()) || 0,
+      }));
     
     res.status(200).json({
         success: true,
-        groups,
+        groups:newData,
     });
     
 });
