@@ -567,6 +567,238 @@ export const getPrivateChat = asyncHandler(
     });
   }
 );
+
+
+/**
+ * Search for conversations (private and group) for a specific user
+ * @param {ObjectId} userId - The ID of the current user
+ * @param {string} query - The search query
+ * @param {number} limit - Maximum number of results to return
+ * @returns {Promise<Array>} - Array of matching conversations
+ */
+const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query: string) => {
+  
+  
+  const conversations = await Conversation.aggregate([
+    // Lookup users to get fullName
+    {
+      $lookup: {
+        from: "users",
+        localField: "users",
+        foreignField: "_id",
+        as: "usersData",
+      },
+    },
+    
+    // First match to filter only conversations the user is part of
+    {
+      $match: {
+        users: userObjectId
+      },
+    },
+    
+    // Add a field to determine if it's a group or private chat
+    {
+      $addFields: {
+        otherUsers: {
+          $filter: {
+            input: "$usersData",
+            as: "user",
+            cond: { $ne: ["$$user._id", userObjectId] }
+          }
+        }
+      }
+    },
+    
+    // Match the search query pattern
+    {
+      $match: {
+        $or: [
+          // Search in group name (for group chats)
+          { 
+            isGroup: true,
+            groupName: { $regex: query, $options: "i" } 
+          },
+          // Search in other users' names (for private chats)
+          {
+            isGroup: false,
+            "otherUsers.fullName": { $regex: query, $options: "i" }
+          },
+          // Also search in group description
+          {
+            isGroup: true,
+            groupDescription: { $regex: query, $options: "i" }
+          }
+        ],
+      },
+    },
+    
+    // Lookup last message details
+    {
+      $lookup: {
+        from: "messages",
+        let: { conversationId: "$_id" },
+        pipeline: [
+          { $match: { $expr: { $eq: ["$conversationId", "$$conversationId"] } } },
+          { $sort: { createdAt: -1 } },
+          {
+            $match: {
+              deletedfor: { $ne: userObjectId },
+            },
+          },
+          { $limit: 1 },
+        ],
+        as: "lastMessageData",
+      },
+    },
+    
+    // Add fields for last message details
+    {
+      $addFields: {
+        lastMessageCreatedAt: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+        lastMessageSenderId: { $arrayElemAt: ["$lastMessageData.senderId", 0] },
+      },
+    },
+    
+    // Lookup last message sender
+    {
+      $lookup: {
+        from: "users",
+        localField: "lastMessageSenderId",
+        foreignField: "_id",
+        as: "lastMessageSender",
+      },
+    },
+    
+    // Sorting conversations based on latest message
+    {
+      $sort: {
+        lastMessageCreatedAt: -1,
+        createdAt: -1,
+      },
+    },
+    
+    
+    // Lookup group admin details
+    {
+      $lookup: {
+        from: "users",
+        localField: "groupAdmin",
+        foreignField: "_id",
+        as: "groupAdmin",
+      },
+    },
+    
+    // Format last message details
+    {
+      $addFields: {
+        chatName: {
+          $cond: {
+            if: "$isGroup",
+            then: "$groupName",
+            else: { $arrayElemAt: ["$otherUsers.fullName", 0] }
+          }
+        },
+        profilePic: {
+          $cond: {
+            if: "$isGroup",
+            then: "$groupPic",
+            else: { $arrayElemAt: ["$otherUsers.profilePic", 0] }
+          }
+        },
+        "lastMessage.sender": {
+          _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
+          fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
+        },
+        "lastMessage.status": { $arrayElemAt: ["$lastMessageData.status", 0] },
+        "lastMessage.mesId": { $arrayElemAt: ["$lastMessageData.mesId", 0] },
+        "lastMessage.type": { $arrayElemAt: ["$lastMessageData.type", 0] },
+        "lastMessage.text": { $arrayElemAt: ["$lastMessageData.text", 0] },
+        "lastMessage.createdAt": { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+      },
+    },
+    
+    // Final projection to select required fields
+    {
+      $project: {
+        _id: 1,
+        chatName: 1,
+        isGroup: 1,
+        groupName: 1,
+        groupPic: 1,
+        profilePic: 1,
+        groupDescription: 1,
+        users: "$otherUsers",
+        groupAdmin: { 
+          $cond: {
+            if: { $eq: [{ $size: "$groupAdmin" }, 0] },
+            then: null,
+            else: {
+              _id: { $arrayElemAt: ["$groupAdmin._id", 0] },
+              fullName: { $arrayElemAt: ["$groupAdmin.fullName", 0] },
+              profilePic: { $arrayElemAt: ["$groupAdmin.profilePic", 0] }
+            }
+          }
+        },
+        lastMessage: 1,
+        createdAt: 1,
+      },
+    },
+  ]);
+  
+  return conversations || [];
+};
+
+export const getChatsByQuery = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req?.user?.id;
+  const { query } = req.query;
+  const LIMIT = 10;
+
+  if (!userId) throw new CustomError("UserId not provided", 400);
+  if (!query) throw new CustomError("Search query is required", 400);
+
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+
+  const conversations =await searchConversations(userObjectId,query as string);
+  const chatData = formatChatData(conversations, userId);
+  const conversationIds = conversations.map((d:any) => d._id);
+
+  const unreadMessagesPerConversation = await Message.aggregate([
+    {
+      $match: {
+        conversationId: { $in: conversationIds },
+        senderId: { $ne: userObjectId }, // Exclude sender's own messages
+        seenBy: { $nin: [userObjectId] }, // Ensure user is NOT in seenBy
+      },
+    },
+    {
+      $group: {
+        _id: "$conversationId",
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  // Convert unread messages to a map for quick lookup
+  const unreadMessagesMap = new Map(
+    unreadMessagesPerConversation.map(({ _id, count }) => [_id.toString(), count])
+  );
+
+  // Merge unread messages count into chatData
+  const newData = chatData.map((chat) => ({
+    ...chat,
+    unreadMessages: unreadMessagesMap.get(chat._id.toString()) || 0,
+  }));
+
+  res.status(200).json({
+    message: "Fetched search results",
+    users: newData,
+    conversationIds,
+    hasMore: conversations.length === LIMIT,
+    success: true,
+  });
+});
+
 const deleteAllMessages = async () => {
   try {
     await Message.deleteMany({});
