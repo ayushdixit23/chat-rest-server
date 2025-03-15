@@ -30,12 +30,12 @@ export const createFriendRequest = asyncHandler(async (req: Request, res: Respon
         isSentTo: userId,
         status: { $in: ["pending", "rejected"] }, // Check both statuses in a single query
     });
-    
+
     if (existingFriendRequest) {
         if (existingFriendRequest.status === "pending") {
             throw new CustomError("This user has already sent you a friend request", 400);
         }
-    
+
         // If the request was rejected, delete it to allow a new one
         await FriendRequest.deleteOne({ _id: existingFriendRequest._id });
     }
@@ -174,4 +174,36 @@ export const fetchSentFriendRequest = asyncHandler(async (req: Request, res: Res
     }).populate("isSentTo", "fullName userName profilePic");
 
     res.status(200).json({ message: "Fetched friend request!", success: true, requests: friendRequests || [] });
+});
+
+export const fetchAddFriends = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req?.user?.id;
+    const { groupId } = req.params;
+
+    if (!userId) {
+        throw new CustomError("UserId not provided", 400);
+    }
+
+    const group = await Conversation.findById(groupId);
+
+    if (!group) {
+        throw new CustomError("Group not found", 404);
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+        throw new CustomError("User not found", 404);
+    }
+
+    const friends = user.friends || [];
+
+    const groupMembers = group.users || [];
+
+    // Fetch friends excluding those already in the group
+    const users = await User.find({
+        _id: { $in: friends, $nin: groupMembers, $ne: userId }
+    }).select("fullName userName profilePic");
+
+    res.status(200).json({ success: true, users });
 });

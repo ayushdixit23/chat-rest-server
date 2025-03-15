@@ -83,13 +83,11 @@ export const updateGroup = asyncHandler(async (req: Request, res: Response) => {
     if (!updatedGroup)
         throw new CustomError("Group not found or unauthorized", 404);
 
-    res
-        .status(200)
-        .json({
-            message: "Group updated successfully!",
-            success: true,
-            group: updatedGroup,
-        });
+    res.status(200).json({
+        message: "Group updated successfully!",
+        success: true,
+        group: updatedGroup,
+    });
 });
 
 export const deleteGroup = asyncHandler(async (req: Request, res: Response) => {
@@ -120,92 +118,95 @@ export const deleteGroup = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const addMembersToGroup = asyncHandler(async (req: Request, res: Response) => {
-    const userId = req?.user?.id;
-    const { groupId } = req.params;
-    const { members } = req.body;
+        const userId = req?.user?.id;
+        const { groupId } = req.params;
+        const { members } = req.body;
 
-    if (!userId) throw new CustomError("UserId not provided", 400);
-    if (!groupId) throw new CustomError("Group ID not provided", 400);
-    if (!Array.isArray(members) || members.length === 0) {
-        throw new CustomError("Members array not provided or empty", 400);
-    }
-    if (members.includes(userId)) {
-        throw new CustomError("You cannot add yourself to the group", 400);
-    }
-
-    // Fetch all members in a single query
-    const users = await User.find({ _id: { $in: members } }).select("_id friends");
-
-    // Validate all members exist
-    if (users.length !== members.length) {
-        throw new CustomError("One or more member IDs are invalid", 400);
-    }
-
-    // Validate all members are friends with the user
-    for (const user of users) {
-        console.log(user,"user")
-        if (!user.friends.some((friendId) => friendId.equals(userId))) {
-            throw new CustomError("Only friends can be added", 400);
+        if (!userId) throw new CustomError("UserId not provided", 400);
+        if (!groupId) throw new CustomError("Group ID not provided", 400);
+        if (!Array.isArray(members) || members.length === 0) {
+            throw new CustomError("Members array not provided or empty", 400);
         }
+        if (members.includes(userId)) {
+            throw new CustomError("You cannot add yourself to the group", 400);
+        }
+
+        // Fetch all members in a single query
+        const users = await User.find({ _id: { $in: members } }).select(
+            "_id friends"
+        );
+
+        // Validate all members exist
+        if (users.length !== members.length) {
+            throw new CustomError("One or more member IDs are invalid", 400);
+        }
+
+        // Validate all members are friends with the user
+        for (const user of users) {
+            if (!user.friends.some((friendId) => friendId.equals(userId))) {
+                throw new CustomError("Only friends can be added", 400);
+            }
+        }
+
+        // Find and update the group if the user is the admin
+        const updatedGroup = await Conversation.findOneAndUpdate(
+            { _id: groupId, groupAdmin: userId, isGroup: true },
+            { $addToSet: { users: { $each: members } } },
+            { new: true }
+        );
+
+        if (!updatedGroup) {
+            throw new CustomError("Group not found or unauthorized", 404);
+        }
+
+        await User.updateMany(
+            { _id: { $in: members } },
+            { $addToSet: { conversations: groupId } }
+        );
+
+        res.status(200).json({
+            message: `${members.length > 1 ? "Members" : "Member"
+                } added successfully!`,
+            success: true,
+            group: updatedGroup,
+        });
     }
-
-    // Find and update the group if the user is the admin
-    const updatedGroup = await Conversation.findOneAndUpdate(
-        { _id: groupId, groupAdmin: userId, isGroup: true },
-        { $addToSet: { users: { $each: members } } },
-        { new: true }
-    );
-
-    if (!updatedGroup) {
-        throw new CustomError("Group not found or unauthorized", 404);
-    }
-
-    await User.updateMany(
-        { _id: { $in: members } },
-        { $addToSet: { conversations: groupId } }
-    );
-
-    res.status(200).json({
-        message: "Members updated successfully!",
-        success: true,
-        group: updatedGroup,
-    });
-});
+);
 
 export const removeMembersFromGroup = asyncHandler(async (req: Request, res: Response) => {
-    const userId = req?.user?.id;
-    const { groupId } = req.params;
-    const { members } = req.body;
+        const userId = req?.user?.id;
+        const { groupId } = req.params;
+        const { members } = req.body;
 
-    if (!userId) throw new CustomError("UserId not provided", 400);
-    if (!groupId) throw new CustomError("Group ID not provided", 400);
-    if (!Array.isArray(members) || members.length === 0) {
-        throw new CustomError("Members array not provided or empty", 400);
+        if (!userId) throw new CustomError("UserId not provided", 400);
+        if (!groupId) throw new CustomError("Group ID not provided", 400);
+        if (!Array.isArray(members) || members.length === 0) {
+            throw new CustomError("Members array not provided or empty", 400);
+        }
+
+        // Find and update the group if the user is the admin
+        const updatedGroup = await Conversation.findOneAndUpdate(
+            { _id: groupId, groupAdmin: userId, isGroup: true },
+            { $pull: { users: { $in: members } } },
+            { new: true }
+        );
+
+        if (!updatedGroup) {
+            throw new CustomError("Group not found or unauthorized", 404);
+        }
+
+        await User.updateMany(
+            { _id: { $in: members } },
+            { $pull: { conversation: groupId } }
+        );
+
+        res.status(200).json({
+            message: "Members updated successfully!",
+            success: true,
+            group: updatedGroup,
+        });
     }
-
-    // Find and update the group if the user is the admin
-    const updatedGroup = await Conversation.findOneAndUpdate(
-        { _id: groupId, groupAdmin: userId, isGroup: true },
-        { $pull: { users: { $in: members } } },
-        { new: true }
-    );
-
-    if (!updatedGroup) {
-        throw new CustomError("Group not found or unauthorized", 404);
-    }
-
-    await User.updateMany(
-        { _id: { $in: members } },
-        { $pull: { conversation: groupId } }
-    );
-
-
-    res.status(200).json({
-        message: "Members updated successfully!",
-        success: true,
-        group: updatedGroup,
-    });
-});
+);
 
 export const fetchGroups = asyncHandler(async (req: Request, res: Response) => {
     const userId = req.user?.id;
@@ -213,7 +214,7 @@ export const fetchGroups = asyncHandler(async (req: Request, res: Response) => {
     if (!userId) {
         throw new CustomError("UserId not provided", 400);
     }
-    
+
     const groups = await Conversation.aggregate([
         {
             $match: {
@@ -231,7 +232,9 @@ export const fetchGroups = asyncHandler(async (req: Request, res: Response) => {
         },
         {
             $addFields: {
-                lastMessageCreatedAt: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+                lastMessageCreatedAt: {
+                    $arrayElemAt: ["$lastMessageData.createdAt", 0],
+                },
                 lastMessageSenderId: { $arrayElemAt: ["$lastMessageData.senderId", 0] },
                 lastMessageText: { $arrayElemAt: ["$lastMessageData.text", 0] },
                 lastMessageType: { $arrayElemAt: ["$lastMessageData.type", 0] },
@@ -272,21 +275,21 @@ export const fetchGroups = asyncHandler(async (req: Request, res: Response) => {
                 lastMessage: {
                     _id: { $arrayElemAt: ["$lastMessageData._id", 0] },
                     content: { $arrayElemAt: ["$lastMessageData.content", 0] },
-                    type: { $arrayElemAt: ["$lastMessageData.type", 0] },  // Added type
-                    text: { $arrayElemAt: ["$lastMessageData.text", 0] },  // Added text
+                    type: { $arrayElemAt: ["$lastMessageData.type", 0] }, // Added type
+                    text: { $arrayElemAt: ["$lastMessageData.text", 0] }, // Added text
                     createdAt: {
                         $dateToString: {
                             format: "%Y-%m-%d %H:%M:%S",
-                            date: { $arrayElemAt: ["$lastMessageData.createdAt", 0] }
-                        }
+                            date: { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
+                        },
                     },
                     sender: {
                         _id: { $arrayElemAt: ["$lastMessageSender._id", 0] },
                         fullName: { $arrayElemAt: ["$lastMessageSender.fullName", 0] },
-                        profilePic: { $arrayElemAt: ["$lastMessageSender.profilePic", 0] }
-                    }
-                }
-            }
+                        profilePic: { $arrayElemAt: ["$lastMessageSender.profilePic", 0] },
+                    },
+                },
+            },
         },
         {
             $project: {
@@ -299,42 +302,72 @@ export const fetchGroups = asyncHandler(async (req: Request, res: Response) => {
                 createdAt: 1,
             },
         },
-    ]);    
+    ]);
 
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
     const conversationIds = groups.map((d) => d._id);
-     const unreadMessagesPerConversation = await Message.aggregate([
+    const unreadMessagesPerConversation = await Message.aggregate([
         {
-          $match: {
-            conversationId: { $in: conversationIds },
-            senderId: { $ne: userObjectId },
-            seenBy: { $nin: [userObjectId] }, 
-          },
+            $match: {
+                conversationId: { $in: conversationIds },
+                senderId: { $ne: userObjectId },
+                seenBy: { $nin: [userObjectId] },
+            },
         },
         {
-          $group: {
-            _id: "$conversationId",
-            count: { $sum: 1 },
-          },
+            $group: {
+                _id: "$conversationId",
+                count: { $sum: 1 },
+            },
         },
-      ]);
+    ]);
 
-      const unreadMessagesMap = new Map(
-        unreadMessagesPerConversation.map(({ _id, count }) => [_id.toString(), count])
-      );
-    
-      // Merge unread messages count into chatData
-      const newData = groups.map((chat) => ({
+    const unreadMessagesMap = new Map(
+        unreadMessagesPerConversation.map(({ _id, count }) => [
+            _id.toString(),
+            count,
+        ])
+    );
+
+    // Merge unread messages count into chatData
+    const newData = groups.map((chat) => ({
         ...chat,
         unreadMessages: unreadMessagesMap.get(chat._id.toString()) || 0,
-      }));
-    
+    }));
+
     res.status(200).json({
         success: true,
-        groups:newData,
+        groups: newData,
     });
-    
 });
 
+export const leaveGroup = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req?.user?.id;
+    const { groupId } = req.params;
+
+    if (!userId) {
+        throw new CustomError("User ID is required", 400);
+    }
+
+    const [group, user] = await Promise.all([
+        Conversation.findById(groupId),
+        User.findById(userId),
+    ]);
+
+    if (!group) throw new CustomError("Group not found", 404);
+    if (!user) throw new CustomError("User not found", 404);
+
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+    if (!group.users.some((id) => id.equals(userObjectId))) {
+        throw new CustomError("User is not a member of the group", 400);
+    }
+
+    await Promise.all([
+        Conversation.updateOne({ _id: groupId }, { $pull: { users: userId } }),
+        User.updateOne({ _id: userId }, { $pull: { conversation: groupId } }),
+    ]);
+
+    res.status(200).json({ message: "User left the group", success: true });
+});
 

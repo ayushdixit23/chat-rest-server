@@ -1,6 +1,6 @@
 import express from "express";
 import { verifyUserToken } from "../middlewares/auth.js";
-import { createFriendRequest, fetchFriendRequest, respondFriendRequest,getUserSuggestion, fetchSentFriendRequest } from "../controllers/friend-request.js";
+import { createFriendRequest, fetchFriendRequest, respondFriendRequest,getUserSuggestion, fetchSentFriendRequest, fetchAddFriends } from "../controllers/friend-request.js";
 
 const router = express.Router();
 
@@ -9,5 +9,6 @@ router.post("/responsed-friend-request/:friendRequestId", verifyUserToken, respo
 router.get("/fetchFriendRequest", verifyUserToken, fetchFriendRequest);
 router.get("/get-user-suggestion", verifyUserToken, getUserSuggestion);
 router.get("/fetchSentFriendRequest", verifyUserToken, fetchSentFriendRequest);
+router.get("/fetch-add-friends/:groupId", verifyUserToken, fetchAddFriends);
 
 export default router;

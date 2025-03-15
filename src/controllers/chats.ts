@@ -539,16 +539,18 @@ export const getPrivateChat = asyncHandler(
     if (conversation.isGroup) {
       const groupUsers = await User.find({
         _id: { $in: conversation.users, $nin: [conversation.groupAdmin] },
-      }).select("fullName profilePic");
+      }).select("fullName profilePic userName");
 
       const groupAdmin = await User.findById(conversation.groupAdmin).select(
-        "fullName profilePic"
+        "fullName profilePic userName"
       );
 
       conversationData.groupUsers = groupAdmin
-        ? [...groupUsers, { ...groupAdmin.toObject(), isAdmin: true }]
+        ? [{ ...groupAdmin.toObject(), isAdmin: true },...groupUsers]
         : groupUsers;
       conversationData.groupName = conversation.groupName;
+      conversationData.groupDescription = conversation.groupDescription;
+      conversationData.groupAdmin = conversation.groupAdmin;
       conversationData.groupPic = conversation.groupPic;
     } else {
       const otherUser = conversation.users.find(
@@ -559,6 +561,7 @@ export const getPrivateChat = asyncHandler(
       );
       conversationData.otherUser = otherUserData;
     }
+    conversationData.createdAt = conversation.createdAt;
 
     res.status(200).json({
       message: conversation.isGroup ? "Get group chat" : "Get private chat",
@@ -577,8 +580,6 @@ export const getPrivateChat = asyncHandler(
  * @returns {Promise<Array>} - Array of matching conversations
  */
 const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query: string) => {
-  
-  
   const conversations = await Conversation.aggregate([
     // Lookup users to get fullName
     {
