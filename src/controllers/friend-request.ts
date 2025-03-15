@@ -25,6 +25,21 @@ export const createFriendRequest = asyncHandler(async (req: Request, res: Respon
         throw new CustomError("User is already a friend", 400);
     }
 
+    const existingFriendRequest = await FriendRequest.findOne({
+        sentBy: friendId,
+        isSentTo: userId,
+        status: { $in: ["pending", "rejected"] }, // Check both statuses in a single query
+    });
+    
+    if (existingFriendRequest) {
+        if (existingFriendRequest.status === "pending") {
+            throw new CustomError("This user has already sent you a friend request", 400);
+        }
+    
+        // If the request was rejected, delete it to allow a new one
+        await FriendRequest.deleteOne({ _id: existingFriendRequest._id });
+    }
+
     // Check if a friend request has already been sent
     const existingRequest = await FriendRequest.findOne({
         sentBy: userId,
@@ -142,7 +157,21 @@ export const getUserSuggestion = asyncHandler(async (req: Request, res: Response
             { _id: { $ne: userId } },
             { _id: { $nin: [...(user.sentFriendRequests || []), ...(user.friends || [])] } }
         ],
-    }).limit(5).select("-password");
+    }).limit(10).select("-password");
 
     res.status(200).json({ success: true, users: suggestedUsers });
+});
+
+export const fetchSentFriendRequest = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req?.user?.id;
+
+    if (!userId) {
+        throw new CustomError("UserId not provided", 400);
+    }
+
+    const friendRequests = await FriendRequest.find({
+        sentBy: userId,
+    }).populate("isSentTo", "fullName userName profilePic");
+
+    res.status(200).json({ message: "Fetched friend request!", success: true, requests: friendRequests || [] });
 });
