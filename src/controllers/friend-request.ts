@@ -207,3 +207,37 @@ export const fetchAddFriends = asyncHandler(async (req: Request, res: Response) 
 
     res.status(200).json({ success: true, users });
 });
+
+
+export const cancelFriendRequestByUserItSelf = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req?.user?.id;
+    const { requestId } = req.params;
+
+    if (!userId) {
+        throw new CustomError("UserId not provided", 400);
+    }
+
+    // Fetch the friend request and user at the same time
+    const friendRequest = await FriendRequest.findById(requestId);
+
+    if (!friendRequest) {
+        throw new CustomError("Friend request not found", 404);
+    }
+
+    if (friendRequest.sentBy.toString() !== userId) {
+        throw new CustomError("You are not the recipient of this friend request", 400);
+    }
+
+    if (friendRequest.status !== "pending") {
+        throw new CustomError("Only Pending Request Can be Canceled", 400);
+    }
+
+    const otherUser = friendRequest.isSentTo
+
+    await Promise.all([
+        User.updateOne({ _id: userId }, { $pull: { sentFriendRequests: otherUser } }),
+        friendRequest.deleteOne()
+    ])
+
+    res.status(200).json({ message: "Friend request canceled", success: true });
+});
