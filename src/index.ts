@@ -10,6 +10,7 @@ import { CustomError } from "./middlewares/errors/CustomError.js";
 import chatsRouter from "./routes/chats.js";
 import friendRequestsRouter from "./routes/friend-request.js";
 import groupRouter from "./routes/group.js";
+import client from "prom-client";
 import { rateLimit } from 'express-rate-limit'
 
 const limiter = rateLimit({
@@ -20,7 +21,7 @@ const limiter = rateLimit({
 })
 
 // Allowed origins for CORS
-const allowedOrigins = ["http://localhost:3000", "http://localhost:3001"];
+const allowedOrigins = ["http://localhost:3000", "http://192.168.1.2:3000", "http://localhost:3001"];
 
 // Initialize Express app
 const app = express();
@@ -35,6 +36,26 @@ app.use(limiter)
 // Logging based on environment (development/production)
 const logFormat = NODE_ENV === "development" ? "dev" : "combined";
 app.use(morgan(logFormat));
+
+
+// Create a Registry which registers the metrics
+const register = new client.Registry();
+
+// Add default metrics to the registry
+client.collectDefaultMetrics({ register });
+
+// Custom metric - Counter
+const requestCounter = new client.Counter({
+  name: 'http_requests_total',
+  help: 'Total number of HTTP requests',
+  labelNames: ['method', 'endpoint']
+});
+
+// Increment the counter on each request
+app.use((req, res, next) => {
+  requestCounter.inc({ method: req.method, endpoint: req.url });
+  next();
+});
 
 // Compression middleware
 app.use(compression());
@@ -61,6 +82,12 @@ app.use(
 // Routes
 app.get("/", (_, res) => {
   res.send("Server is running!");
+});
+
+// Expose /metrics endpoint for Prometheus
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
 });
 
 app.get("/api/data", (_, res) => {
