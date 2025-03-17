@@ -11,5 +11,8 @@ router.get(`/getOlderMessages/:conversationId`, verifyUserToken, getOlderMessage
 router.post("/generate-presignedurl", verifyUserToken, generatePresignedurl);
 router.post("/generateDowloadUrl", verifyUserToken, getDownloadUrl);
 router.get("/getChatsByQuery", verifyUserToken, getChatsByQuery);
+router.get("/check", (req, res) => {
+    res.status(200).json({ message: "hello", req: req.path, success: true })
+});
 
 export default router;
