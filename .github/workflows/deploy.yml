@@ -25,8 +25,9 @@ jobs:
     - name: Build and push Docker image
       run: |
         echo "Building Docker image..."
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/chat-rest-server:latest .
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/chat-rest-server:${{ github.sha }} -t ${{ secrets.DOCKERHUB_USERNAME }}/chat-rest-server:latest .
         echo "Docker image built successfully. Pushing to Docker Hub..."
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/chat-rest-server:${{ github.sha }}
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/chat-rest-server:latest
         echo "Docker image pushed successfully!"
 
@@ -61,12 +62,12 @@ jobs:
         sudo docker ps -q --filter "name=mongo" | grep -q . || sudo docker run -d --name mongo --network backend mongo
         echo "MongoDB container is running or started!"
 
-        # Stop and remove old chat-rest-server container
         echo "Stopping and removing old chat-rest-server container if exists..."
         sudo docker ps -q --filter "name=chat-rest-server" | grep -q . && \
-          sudo docker stop chat-rest-server && \
-          sudo docker rm -f chat-rest-server
-        echo "Old chat-rest-server container stopped and removed if it existed."
+         sudo docker stop chat-rest-server && \
+         sudo docker rm -f chat-rest-server && \
+         sudo docker images -q ayushdixit23/chat-rest-server* | xargs sudo docker rmi -f && \
+         echo "Old chat-rest-server container stopped and removed along with images."
 
         # Run new chat-rest-server container with env variables loaded from .env
         echo "Starting new chat-rest-server container..."
