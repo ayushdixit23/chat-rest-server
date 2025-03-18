@@ -504,6 +504,22 @@ export const getPrivateChat = asyncHandler(
         const otherUser = await User.findById(otherUserId);
         isBlockedByUser = otherUser?.blockedConversations.includes(ObjectIdConversationId) || false;
       }
+
+      const unSeenMessages = await Message.find({
+        conversationId,
+        seenBy: { $ne: userId },
+        isSeen: false,
+      }).select("_id"); 
+
+      if (unSeenMessages.length > 0) {
+        await Message.updateMany(
+          { _id: { $in: unSeenMessages.map((msg) => msg._id) } },
+          {
+            $addToSet: { seenBy: userId },
+            isSeen: true,
+          }
+        );
+      }
     }
 
     // Get total message count
@@ -546,7 +562,7 @@ export const getPrivateChat = asyncHandler(
       );
 
       conversationData.groupUsers = groupAdmin
-        ? [{ ...groupAdmin.toObject(), isAdmin: true },...groupUsers]
+        ? [{ ...groupAdmin.toObject(), isAdmin: true }, ...groupUsers]
         : groupUsers;
       conversationData.groupName = conversation.groupName;
       conversationData.groupDescription = conversation.groupDescription;
@@ -571,15 +587,7 @@ export const getPrivateChat = asyncHandler(
   }
 );
 
-
-/**
- * Search for conversations (private and group) for a specific user
- * @param {ObjectId} userId - The ID of the current user
- * @param {string} query - The search query
- * @param {number} limit - Maximum number of results to return
- * @returns {Promise<Array>} - Array of matching conversations
- */
-const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query: string) => {
+const searchConversations = async (userObjectId: mongoose.Types.ObjectId, query: string) => {
   const conversations = await Conversation.aggregate([
     // Lookup users to get fullName
     {
@@ -590,14 +598,14 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         as: "usersData",
       },
     },
-    
+
     // First match to filter only conversations the user is part of
     {
       $match: {
         users: userObjectId
       },
     },
-    
+
     // Add a field to determine if it's a group or private chat
     {
       $addFields: {
@@ -610,15 +618,15 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         }
       }
     },
-    
+
     // Match the search query pattern
     {
       $match: {
         $or: [
           // Search in group name (for group chats)
-          { 
+          {
             isGroup: true,
-            groupName: { $regex: query, $options: "i" } 
+            groupName: { $regex: query, $options: "i" }
           },
           // Search in other users' names (for private chats)
           {
@@ -633,7 +641,7 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         ],
       },
     },
-    
+
     // Lookup last message details
     {
       $lookup: {
@@ -652,7 +660,7 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         as: "lastMessageData",
       },
     },
-    
+
     // Add fields for last message details
     {
       $addFields: {
@@ -660,7 +668,7 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         lastMessageSenderId: { $arrayElemAt: ["$lastMessageData.senderId", 0] },
       },
     },
-    
+
     // Lookup last message sender
     {
       $lookup: {
@@ -670,7 +678,7 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         as: "lastMessageSender",
       },
     },
-    
+
     // Sorting conversations based on latest message
     {
       $sort: {
@@ -678,8 +686,8 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         createdAt: -1,
       },
     },
-    
-    
+
+
     // Lookup group admin details
     {
       $lookup: {
@@ -689,7 +697,7 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         as: "groupAdmin",
       },
     },
-    
+
     // Format last message details
     {
       $addFields: {
@@ -718,7 +726,7 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         "lastMessage.createdAt": { $arrayElemAt: ["$lastMessageData.createdAt", 0] },
       },
     },
-    
+
     // Final projection to select required fields
     {
       $project: {
@@ -730,7 +738,7 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
         profilePic: 1,
         groupDescription: 1,
         users: "$otherUsers",
-        groupAdmin: { 
+        groupAdmin: {
           $cond: {
             if: { $eq: [{ $size: "$groupAdmin" }, 0] },
             then: null,
@@ -746,7 +754,7 @@ const searchConversations = async (userObjectId : mongoose.Types.ObjectId, query
       },
     },
   ]);
-  
+
   return conversations || [];
 };
 
@@ -760,9 +768,9 @@ export const getChatsByQuery = asyncHandler(async (req: Request, res: Response) 
 
   const userObjectId = new mongoose.Types.ObjectId(userId);
 
-  const conversations =await searchConversations(userObjectId,query as string);
+  const conversations = await searchConversations(userObjectId, query as string);
   const chatData = formatChatData(conversations, userId);
-  const conversationIds = conversations.map((d:any) => d._id);
+  const conversationIds = conversations.map((d: any) => d._id);
 
   const unreadMessagesPerConversation = await Message.aggregate([
     {
@@ -799,19 +807,3 @@ export const getChatsByQuery = asyncHandler(async (req: Request, res: Response) 
     success: true,
   });
 });
-
-const deleteAllMessages = async () => {
-  try {
-    await Message.deleteMany({});
-
-    await Conversation.updateMany({}, {
-      $set: { lastMessage: null, messages: [] }
-    });
-
-    console.log("All messages deleted and conversations updated.");
-  } catch (error) {
-    console.error("Error deleting messages:", error);
-  }
-};
-
-// deleteAllMessages()

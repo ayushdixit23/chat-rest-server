@@ -30,6 +30,9 @@ const app = express();
 // Connect to MongoDB
 connectDb(MONGO_URI); // Pass your MongoDB URI here
 
+// Enable trust proxy
+app.set('trust proxy', 1);
+
 // Middlewares
 app.use(helmet()); // Security headers
 app.use(limiter)

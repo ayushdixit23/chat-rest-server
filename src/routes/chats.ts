@@ -12,7 +12,7 @@ router.post("/generate-presignedurl", verifyUserToken, generatePresignedurl);
 router.post("/generateDowloadUrl", verifyUserToken, getDownloadUrl);
 router.get("/getChatsByQuery", verifyUserToken, getChatsByQuery);
 router.get("/check", (req, res) => {
-    res.status(200).json({ message: "Hello World from chat-service", req: req.path, success: true })
+    res.status(200).json({ message: "Hello World!", req: req.path, success: true })
 });
 
 export default router;
